@@ -1,0 +1,2 @@
+## B+ Tree
+Currently in progresss. I need to add the get and remove methods. I was also thinking of doing an iterator in C. I saw one in another project and think it would be a good thing to add here, given that the whole point of the B+ Tree is that all the values exist in the leaves. Also will probably end up making a seperate project that is just a test suite for C. I keep baking my own for every project so it would be nice to go all out on one and then just use that going forward. 
