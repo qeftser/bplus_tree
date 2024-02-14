@@ -14,7 +14,7 @@ int main(void) {
 
    add_bx_tree(140,10,&bx);
    add_bx_tree(120,10,&bx);
-   add_bx_tree(100,10,&bx);
+   add_bx_tree(100,20,&bx);
    add_bx_tree(80,10,&bx);
    add_bx_tree(60,10,&bx);
    add_bx_tree(40,10,&bx);
@@ -45,13 +45,14 @@ int main(void) {
    add_bx_tree(123,10,&bx);
    add_bx_tree(132,10,&bx);
    add_bx_tree(240,10,&bx);
-   add_bx_tree(250,10,&bx);
+   add_bx_tree(250,20,&bx);
    add_bx_tree(260,10,&bx);
    add_bx_tree(215,10,&bx);
    add_bx_tree(270,10,&bx);
    add_bx_tree(280,10,&bx);
    add_bx_tree(290,10,&bx);
 
+   /*
    print_block(bx.root);
    safe_load_cache(1,&bx);
    print_block(bx.cached);
@@ -77,6 +78,11 @@ int main(void) {
    print_block(bx.cached);
    safe_load_cache(12,&bx);
    print_block(bx.cached);
+   */
+
+   long int key = 250;
+   rem_bx_tree(key,&bx);
+   printf("Val at %ld: %d\n",key,get_bx_tree(key,&bx));
 
    close_bx_tree(&bx);
 

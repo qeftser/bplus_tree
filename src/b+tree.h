@@ -19,7 +19,7 @@ struct bx_tree { char *filepath; int file; char root[4096]; char cached[4096]; i
 void start_bx_tree(struct bx_tree *);
 void close_bx_tree(struct bx_tree *);
 int add_bx_tree(long int, int, struct bx_tree *);
-long int get_bx_tree(long int, struct bx_tree *);
+int get_bx_tree(long int, struct bx_tree *);
 int rem_bx_tree(long int, struct bx_tree *);
 
 /* should be private - here for testing */

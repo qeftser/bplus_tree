@@ -314,6 +314,7 @@ int add_bx_tree(long int key, int val, struct bx_tree *bx) {
          /* change existing value if found */
          if (curr_key == key) {
             set_val(val,bx->cached,idx);
+            bx->cache_written = 1;
             return 1;
          }
          bx->cache_pos = pointer;
@@ -348,4 +349,96 @@ int add_bx_tree(long int key, int val, struct bx_tree *bx) {
    return 1;
 }
 
+/* return INT_MIN on not found */
+int get_bx_tree(long int key, struct bx_tree *bx) {
+   if (!key) { printf("error: key must be non-zero\n"); return -1; }
 
+   /* first check root */
+   int old_pointer, pointer, idx = find_slot(key,bx->root);
+   long int curr_key;
+   int ret_val;
+   
+   get_key(&curr_key,bx->root,idx);
+   /* change existing value if found */
+   if (curr_key == key) {
+      get_val(&ret_val,bx->root,idx);
+      return ret_val;
+   }
+
+   get_pointer(&pointer,bx->root,idx);
+   /* if there is a pointer start descending */
+   if (pointer) {
+      clear_parents(bx);
+      safe_load_cache(pointer,bx);
+      /* start looking though the tree */
+      while (1) {
+         idx = find_slot(key,bx->cached);
+         get_key(&curr_key,bx->cached,idx);
+         /* return existing value if found */
+         if (curr_key == key) {
+            get_val(&ret_val,bx->cached,idx);
+            return ret_val;
+         }
+         bx->cache_pos = pointer;
+         get_pointer(&pointer,bx->cached,idx);
+         /* if there is a pointer decend again */
+         if (pointer && idx != MAX_ELEMENTS) {
+            load_block(bx->cached,pointer,bx);
+            add_parent(bx->cache_pos,bx);
+         }
+         else { /* else value is not found */
+            return INT_MIN;
+         }
+      }
+   }
+
+   return INT_MIN;
+}
+
+/* 'remove' values by setting them to INT_MIN. Then get will return 
+ * failure despite finding the value. Do this to avoid splitting the key */
+int rem_bx_tree(long int key, struct bx_tree *bx) {
+   if (!key) { printf("error: key must be non-zero\n"); return -1; }
+
+   /* first check root */
+   int old_pointer, pointer, idx = find_slot(key,bx->root);
+   long int curr_key;
+   
+   get_key(&curr_key,bx->root,idx);
+   /* change existing value if found */
+   if (curr_key == key) {
+      set_val(INT_MIN,bx->root,idx);
+      return 1;
+   }
+
+   get_pointer(&pointer,bx->root,idx);
+   /* if there is a pointer start descending */
+   if (pointer) {
+      clear_parents(bx);
+      safe_load_cache(pointer,bx);
+      /* start looking though the tree */
+      while (1) {
+         idx = find_slot(key,bx->cached);
+         get_key(&curr_key,bx->cached,idx);
+         /* change existing value if found */
+         if (curr_key == key) {
+            set_val(INT_MIN,bx->cached,idx);
+            bx->cache_written = 1;
+            return 1;
+         }
+         bx->cache_pos = pointer;
+         get_pointer(&pointer,bx->cached,idx);
+         /* if there is a pointer decend again */
+         if (pointer && idx != MAX_ELEMENTS) {
+            load_block(bx->cached,pointer,bx);
+            add_parent(bx->cache_pos,bx);
+         }
+         else { /* else value is not in cache */
+            return 0;
+         }
+      }
+   }
+
+   /* no pointer, add to root */
+   return 0;
+}
