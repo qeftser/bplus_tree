@@ -1,2 +1,30 @@
 ## B+ Tree
-Currently in progresss. I need to add the get and remove methods. I was also thinking of doing an iterator in C. I saw one in another project and think it would be a good thing to add here, given that the whole point of the B+ Tree is that all the values exist in the leaves. Also will probably end up making a seperate project that is just a test suite for C. I keep baking my own for every project so it would be nice to go all out on one and then just use that going forward. 
+Variation of the B-Tree that duplicates parent keys to child nodes, resulting in all keys being present in the leaves of the tree. This allows for efficient iteration over all the elements in the B+ Tree, with the cost of added memory for storing duplicaates. 
+### Usage
+This B+ Tree stores keys as long integers and values as integers.   
+To initialize the B+ Tree use:
+```
+struct bx_tree bx;
+bx.filepath = "/path/to/storage/folder";
+start_bx_tree(&bx);
+```
+To add elements use:
+```
+add_bx_tree(<long int - key>, <int - val>, &bx);
+```
+To get a value at an element:
+```
+get_bx_tree(<long int - key>, &bx); // Returns MIN_INT if value is not found
+```
+To remove a value at an element:
+```
+rem_bx_tree(<long int - key>, &bx); // Sets value to MIN_INT if it exists to keep tree ordering.
+```
+At the end of the program or the B+ Tree's use call:
+```
+close_bx_tree(&bx); // Unloads any cached values or changes
+```
+## TODO
+- Modify find index method to use binary search
+- Add iterator to take advantage of B+ Tree properties
+
