@@ -99,6 +99,12 @@ int is_full(char *block) {
    return last != 0;
 }
 
+int is_internal(char *block) {
+   int first;
+   get_pointer(&first,block,0);
+   return first != 0;
+}
+
 void shift(char *block, int from) {
    int pos = from*16;
    int has_next_pointer,pointer;
@@ -120,6 +126,15 @@ void shift(char *block, int from) {
    set_pointer(pointer,block,from);
 }
 
+void leaf_shift(char *block, int from) {
+   int pos = from*16;
+   memmove(block+(pos+16),block+pos,BLOCKSIZE-(pos+32));
+
+   /* clear slot */
+   memset(block+pos,0,16);
+
+}
+
 int find_slot(long int key, char *block) {
    long int curr_key;
    int idx = 0;
@@ -132,126 +147,6 @@ int find_slot(long int key, char *block) {
    return idx;
 }
 
-void add_slot_x_split_pointer(int val, long int key, int pointer, char *block, int block_num, struct bx_tree *bx) {
-   /* if block if full we need to split it */
-   if (is_full(block)) {
-      if (block_num == 0) {
-         long int mid_key = split_root(bx);
-         /* now we need to add to one of the new children 
-          *  - we will determine this by going to the left or right of the middle key */
-         if (key < mid_key) {
-            safe_load_cache(bx->total_blocks-2,bx);
-         }
-         else {
-            safe_load_cache(bx->total_blocks-1,bx);
-         }
-         block = bx->cached;
-      }
-      else {
-         split(block,bx);
-      }
-   }
-
-   /* get position */
-   int idx = find_slot(key,block);
-   
-   /* oepn the position */
-   shift(block,idx);
-
-   /* add key, value, and pointer */
-   set_slot(key,val,block,idx);
-   set_pointer(pointer,block,idx+1);
-   
-   /* fin */
-}
-
-void split(char *block, struct bx_tree *bx) {
-   static int mid = (BLOCKSIZE / 2) - 16;
-   int parent;
-   char new_block[BLOCKSIZE];
-   int to_add_pointer = bx->total_blocks;
-   int old_pointer;
-   long int to_add_key;
-   int to_add_val;
-   
-   /* create new block */
-   load_block(new_block,bx->total_blocks,bx);
-
-   /* get middle value */
-   get_key(&to_add_key,block,mid/16);
-   get_val(&to_add_val,block,mid/16);
-
-   /* copy half to new block - exclude last slot */
-   memcpy(new_block,block+mid,BLOCKSIZE-(mid+16));
-
-   /* set new block to point to next block */
-   get_pointer(&old_pointer,block,MAX_ELEMENTS);
-   set_pointer(old_pointer,new_block,MAX_ELEMENTS);
-
-   /* and erase the copied portion from old block */
-   memset(block+mid,0,BLOCKSIZE-mid);
-   bx->cache_written = 1;
-
-   /* set block to point to new block */
-   set_pointer(to_add_pointer,block,MAX_ELEMENTS); /* leaf points to next leaf */
-   //set_pointer(to_add_pointer,block,mid/16); /* also as last element for shifting effects */
-
-   /* write new block changes */
-   write_block(new_block,to_add_pointer,bx);
-
-   /* add values to parent now */
-   if (get_parent(bx) == 0) {
-      add_slot_x_split_pointer(to_add_val,to_add_key,to_add_pointer,bx->root,0,bx);
-   }
-   else {
-      int parent = rem_parent(bx);
-      safe_load_cache(parent,bx);
-      add_slot_x_split_pointer(to_add_val,to_add_key,to_add_pointer,bx->cached,parent,bx);
-   }
-}
-
-long int split_root(struct bx_tree *bx) {
-   static int mid = (BLOCKSIZE / 2) - 16;
-   char new_block_left[BLOCKSIZE];
-   char new_block_right[BLOCKSIZE];
-   int left_pointer = bx->total_blocks;
-   int right_pointer = bx->total_blocks+1;
-   int mid_val;
-   long int mid_key;
-   
-   /* get middle value */
-   get_val(&mid_val,bx->root,mid/16);
-   get_key(&mid_key,bx->root,mid/16);
-
-   /* create new blocks - 2 children */
-   load_block(new_block_left,left_pointer,bx);
-   load_block(new_block_right,right_pointer,bx);
-
-   /* copy contents of root to blocks */
-   memcpy(new_block_left,bx->root,BLOCKSIZE-(mid+28));
-   memcpy(new_block_right,bx->root+mid,BLOCKSIZE-(mid));
-
-   /* set last pointer in left block to point to right block */
-   set_pointer(right_pointer,new_block_left,MAX_ELEMENTS); /* leaf pointer to next leaf */
-   //set_pointer(right_pointer,new_block_left,mid/16); /* alse setting as last pointer for shifting */
-
-   /* write changes */
-   write_block(new_block_left,left_pointer,bx);
-   write_block(new_block_right,right_pointer,bx);
-
-   /* add values to root now */
-   /* clear root */
-   memset(bx->root,0,BLOCKSIZE);
-
-   /* set pointers to left and right blocks */
-   set_pointer(left_pointer,bx->root,0);
-   set_pointer(right_pointer,bx->root,1);
-
-   /* add mid value to root - only value in root now */
-   set_slot(mid_key,mid_val,bx->root,0);
-
-   return mid_key;
-}
 
 void print_block(char *block) {
    static int val,pointer;
@@ -289,156 +184,431 @@ void close_bx_tree(struct bx_tree *bx) {
 }
 
 int add_bx_tree(long int key, int val, struct bx_tree *bx) {
-   if (!key) { printf("error: key must be non-zero\n"); return -1; }
-
-   /* first check root */
-   int old_pointer, pointer, idx = find_slot(key,bx->root);
    long int curr_key;
+   int curr_pointer, curr_val, pos;
    
-   get_key(&curr_key,bx->root,idx);
-   /* change existing value if found */
+   /* first search the root */
+   pos = find_slot(key, bx->root);
+   get_key(&curr_key,bx->root,pos);
    if (curr_key == key) {
-      set_val(val,bx->root,idx);
-      return 1;
-   }
+      /* if the current key is equal to our key, we replace the value */
+      set_val(val,bx->root,pos);
+      pos++; /* decend to this node's children */
 
-   get_pointer(&pointer,bx->root,idx);
-   /* if there is a pointer start descending */
-   if (pointer) {
-      clear_parents(bx);
-      safe_load_cache(pointer,bx);
-      /* start looking though the tree */
-      while (1) {
-         idx = find_slot(key,bx->cached);
-         get_key(&curr_key,bx->cached,idx);
-         /* change existing value if found */
-         if (curr_key == key) {
-            set_val(val,bx->cached,idx);
-            bx->cache_written = 1;
-            return 1;
-         }
-         bx->cache_pos = pointer;
-         get_pointer(&pointer,bx->cached,idx);
-         /* if there is a pointer decend again */
-         if (pointer && idx != MAX_ELEMENTS) {
-            load_block(bx->cached,pointer,bx);
-            add_parent(bx->cache_pos,bx);
-         }
-         else { /* else add at cached block */
-            if (is_full(bx->cached)) {
-               split(bx->cached,bx);
-               bx->cache_written = 1;
-               return add_bx_tree(key,val,bx);
-            }
-            shift(bx->cached,idx);
-            set_slot(key,val,bx->cached,idx);
-            bx->cache_written = 1;
-            return 1;
-         }
+      if (!is_internal(bx->root)) {
+         /* if this is not an internal node we are done, and can exit */
+         return 1;
       }
    }
 
-   /* no pointer, add to root */
-   if (is_full(bx->root)) {
-      split_root(bx);
-      return add_bx_tree(key,val,bx);
+   get_pointer(&curr_pointer,bx->root,pos);
+   if (curr_pointer) {
+      /* if there is a pointer we are going to decend */
+      clear_parents(bx);
+      add_parent(0,bx);
+
+      safe_load_cache(curr_pointer,bx);
+
+      /* now we enter the case where we are decending */
+      while (1) {
+         /* same as before */
+         pos = find_slot(key, bx->cached);
+         get_key(&curr_key,bx->cached,pos);
+         if (curr_key == key) {
+            /* replace old value */
+            set_val(val,bx->cached,pos);
+            bx->cache_written = 1;
+            pos++; /* decend to this node's children */
+
+            if (!is_internal(bx->cached)) {
+               /* we are done here */
+               return 1;
+            }
+         }
+
+         get_pointer(&curr_pointer,bx->cached,pos);
+         if (curr_pointer && is_internal(bx->cached)) {
+            /* decend */
+            add_parent(bx->cache_pos,bx);
+            safe_load_cache(curr_pointer,bx);
+            continue;
+         }
+
+         /* now if the value is not here and we can't decend we need to add the
+          * value here */
+         if (is_full(bx->cached)) {
+            split_leaf(key,bx);
+         }
+         pos = find_slot(key,bx->cached);
+
+         leaf_shift(bx->cached,pos);
+         set_slot(key,val,bx->cached,pos);
+         bx->cache_written = 1;
+         
+         /* we are done now */
+
+         return 1;
+
+      }
    }
-   shift(bx->root,idx);
-   set_slot(key,val,bx->root,idx);
+
+   /* root is only node - add here - only call this once */
+   if (is_full(bx->root)) {
+      char block[BLOCKSIZE];
+      int ret;
+      split_root_internal(&ret,key,block,bx);
+      pos = find_slot(key,block);
+
+      leaf_shift(block,pos);
+      set_slot(key,val,block,pos);
+
+      write_block(block,ret,bx);
+      return 1;
+
+   }
+
+   leaf_shift(bx->root,pos);
+   set_slot(key,val,bx->root,pos);
 
    return 1;
 }
 
-/* return INT_MIN on not found */
 int get_bx_tree(long int key, struct bx_tree *bx) {
-   if (!key) { printf("error: key must be non-zero\n"); return -1; }
-
-   /* first check root */
-   int old_pointer, pointer, idx = find_slot(key,bx->root);
    long int curr_key;
-   int ret_val;
+   int val, curr_pointer, curr_val, pos;
    
-   get_key(&curr_key,bx->root,idx);
-   /* change existing value if found */
+   /* first search the root */
+   pos = find_slot(key, bx->root);
+   get_key(&curr_key,bx->root,pos);
    if (curr_key == key) {
-      get_val(&ret_val,bx->root,idx);
-      return ret_val;
+      /* if the current key is equal to our key, we replace the value */
+      get_val(&val,bx->root,pos);
+      return val;
    }
 
-   get_pointer(&pointer,bx->root,idx);
-   /* if there is a pointer start descending */
-   if (pointer) {
+   get_pointer(&curr_pointer,bx->root,pos);
+   if (curr_pointer) {
+      /* if there is a pointer we are going to decend */
       clear_parents(bx);
-      safe_load_cache(pointer,bx);
-      /* start looking though the tree */
+      add_parent(0,bx);
+
+      safe_load_cache(curr_pointer,bx);
+
+      /* now we enter the case where we are decending */
       while (1) {
-         idx = find_slot(key,bx->cached);
-         get_key(&curr_key,bx->cached,idx);
-         /* return existing value if found */
+         /* same as before */
+         pos = find_slot(key, bx->cached);
+         get_key(&curr_key,bx->cached,pos);
          if (curr_key == key) {
-            get_val(&ret_val,bx->cached,idx);
-            return ret_val;
+            /* replace old value */
+            get_val(&val,bx->cached,pos);
+
+            return val;
          }
-         bx->cache_pos = pointer;
-         get_pointer(&pointer,bx->cached,idx);
-         /* if there is a pointer decend again */
-         if (pointer && idx != MAX_ELEMENTS) {
-            load_block(bx->cached,pointer,bx);
+
+         get_pointer(&curr_pointer,bx->cached,pos);
+         if (curr_pointer) {
+            /* decend */
             add_parent(bx->cache_pos,bx);
+            safe_load_cache(curr_pointer,bx);
+            continue;
          }
-         else { /* else value is not found */
-            return INT_MIN;
-         }
+
+         
+         /* we are done now */
+
+         return INT_MIN;
+
       }
    }
 
    return INT_MIN;
 }
 
-/* 'remove' values by setting them to INT_MIN. Then get will return 
- * failure despite finding the value. Do this to avoid splitting the key */
 int rem_bx_tree(long int key, struct bx_tree *bx) {
-   if (!key) { printf("error: key must be non-zero\n"); return -1; }
-
-   /* first check root */
-   int old_pointer, pointer, idx = find_slot(key,bx->root);
    long int curr_key;
+   int curr_pointer, pos;
+   int mod = 0;
    
-   get_key(&curr_key,bx->root,idx);
-   /* change existing value if found */
+   /* first search the root */
+   pos = find_slot(key, bx->root);
+   get_key(&curr_key,bx->root,pos);
    if (curr_key == key) {
-      set_val(INT_MIN,bx->root,idx);
-      return 1;
-   }
+      /* if the current key is equal to our key, we replace the value */
+      set_val(INT_MIN,bx->root,pos);
+      pos++; /* decend to this node's children */
+      mod = 1;
 
-   get_pointer(&pointer,bx->root,idx);
-   /* if there is a pointer start descending */
-   if (pointer) {
-      clear_parents(bx);
-      safe_load_cache(pointer,bx);
-      /* start looking though the tree */
-      while (1) {
-         idx = find_slot(key,bx->cached);
-         get_key(&curr_key,bx->cached,idx);
-         /* change existing value if found */
-         if (curr_key == key) {
-            set_val(INT_MIN,bx->cached,idx);
-            bx->cache_written = 1;
-            return 1;
-         }
-         bx->cache_pos = pointer;
-         get_pointer(&pointer,bx->cached,idx);
-         /* if there is a pointer decend again */
-         if (pointer && idx != MAX_ELEMENTS) {
-            load_block(bx->cached,pointer,bx);
-            add_parent(bx->cache_pos,bx);
-         }
-         else { /* else value is not in cache */
-            return 0;
-         }
+      if (!is_internal(bx->root)) {
+         /* if this is not an internal node we are done, and can exit */
+         return 1;
       }
    }
 
-   /* no pointer, add to root */
-   return 0;
+   get_pointer(&curr_pointer,bx->root,pos);
+   if (curr_pointer) {
+      /* if there is a pointer we are going to decend */
+      clear_parents(bx);
+      add_parent(0,bx);
+
+      safe_load_cache(curr_pointer,bx);
+
+      /* now we enter the case where we are decending */
+      while (1) {
+         /* same as before */
+         pos = find_slot(key, bx->cached);
+         get_key(&curr_key,bx->cached,pos);
+         if (curr_key == key) {
+            /* replace old value */
+            set_val(INT_MIN,bx->cached,pos);
+            bx->cache_written = 1;
+            pos++; /* decend to this node's children */
+            mod = 1;
+
+            if (!is_internal(bx->cached)) {
+               /* we are done here */
+               return 1;
+            }
+         }
+
+         get_pointer(&curr_pointer,bx->cached,pos);
+         if (curr_pointer && is_internal(bx->cached)) {
+            /* decend */
+            add_parent(bx->cache_pos,bx);
+            safe_load_cache(curr_pointer,bx);
+            continue;
+         }
+
+         /* now if the value is not here and we can't decend we need to add the
+          * value here */
+         
+         /* we are done now */
+
+         return mod;
+
+      }
+   }
+
+   /* root is only node - add here - only call this once */
+
+   return mod;
 }
+
+void shift_internal(char *block, int pos) {
+   static int pointer;
+
+   /* get pointer to replace */
+   get_pointer(&pointer,block,pos);
+
+   /* shift like normal */
+   int relative = pos*16;
+   memmove(block+(relative+16),block+relative,BLOCKSIZE-(relative+16));
+
+   /* clear slot */
+   memset(block+relative,0,16);
+
+   /* readd pointer */
+   set_pointer(pointer,block,pos);
+}
+
+void split_root_internal(int *ret, long int to_add, char *block, struct bx_tree *bx) {
+   static int mid_val = MAX_ELEMENTS / 2;
+   static int mid_pos = (MAX_ELEMENTS / 2) * 16;
+   static char left[BLOCKSIZE];
+   static char right[BLOCKSIZE];
+   static int left_p;
+   static int right_p;
+   left_p = bx->total_blocks;
+   right_p = bx->total_blocks+1;
+
+   long int key;
+   int val;
+   int pointer;
+   get_key(&key,bx->root,mid_val);
+   get_val(&val,bx->root,mid_val);
+   get_pointer(&pointer,bx->root,mid_val);
+
+   /* copy into left */
+   memcpy(left,bx->root,mid_pos);
+   set_pointer(pointer,left,mid_val);
+
+   /* copy into right */
+   memcpy(right,bx->root+mid_pos,BLOCKSIZE-mid_pos);
+
+   /* zero root */
+   memset(bx->root,0,BLOCKSIZE);
+
+   /* populate root */
+   set_slot(key,val,bx->root,0);
+   set_pointer(left_p,bx->root,0);
+   set_pointer(right_p,bx->root,1);
+
+   /* save new blocks */
+   write_block(left,left_p,bx);
+   write_block(right,right_p,bx);
+
+   /* return values */
+   if (key <= to_add) {
+      *ret = right_p;
+      load_block(block,right_p,bx);
+   }
+   else {
+      *ret = left_p;
+      load_block(block,left_p,bx);
+   }
+}
+
+void add_to_root_parent(long int key, int val, int pointer, struct bx_tree *bx) {
+   static int mid_val = MAX_ELEMENTS / 2;
+   static int mid_pos = (MAX_ELEMENTS / 2) * 16;
+   static char block[BLOCKSIZE];
+   static int pos;
+   static int new_pointer;
+
+   if (is_full(bx->root)) {
+      split_root_internal(&new_pointer,key,block,bx);
+      pos = find_slot(key,block);
+      shift_internal(block,pos);
+      set_slot(key,val,block,pos);
+      set_pointer(pointer,block,pos+1);
+      write_block(block,new_pointer,bx);
+      return;
+   }
+
+   pos = find_slot(key,bx->root);
+   shift_internal(bx->root,pos);
+   set_slot(key,val,bx->root,pos);
+   set_pointer(pointer,bx->root,pos+1);
+
+}
+
+void split_internal(int *ret, long int to_add, int pointer, char *block, struct bx_tree *bx) {
+   static char new_block[BLOCKSIZE];
+   static int mid_val = MAX_ELEMENTS / 2;
+   static int mid_pos = (MAX_ELEMENTS / 2) * 16;
+
+   int old_pointer;
+   long int key; 
+   int val;
+   int parent;
+
+   /* setup */
+   *ret = pointer;
+
+   /* create new block */
+   load_block(new_block,bx->total_blocks,bx);
+
+   /* get 'duplicate' pointer - also other values */
+   parent = rem_parent(bx);
+   get_key(&key,block,mid_val);
+   get_val(&val,block,mid_val);
+   get_pointer(&old_pointer,block,mid_val);
+
+   /* copy after mid to new block */
+   memcpy(new_block,block+mid_pos,BLOCKSIZE-mid_pos);
+
+   /* set portion to zero */
+   memset(block+mid_pos,0,BLOCKSIZE-mid_pos);
+
+   /* read duplicate pointer */
+   set_pointer(old_pointer,block,mid_val);
+
+   write_block(block,pointer,bx);
+   write_block(new_block,bx->total_blocks-1,bx);
+
+   /* take action based on where to add */
+   if (key <= to_add) {
+      load_block(block,bx->total_blocks-1,bx); /* load new_block */
+      *ret = bx->total_blocks-1;
+   }
+
+   /* now we need to add to our parent */
+   if (parent) {
+      add_to_parent(key,val,bx->total_blocks-1,parent,bx);
+   }
+   else {
+      add_to_root_parent(key,val,bx->total_blocks-1,bx);
+   }
+}
+
+void add_to_parent(long int key, int val, int pointer, int parent, struct bx_tree *bx) {
+   static int mid_val = MAX_ELEMENTS / 2;
+   static int mid_pos = (MAX_ELEMENTS / 2) * 16;
+   int pos;
+   char block[BLOCKSIZE];
+   int ret;
+
+   /* setup */
+   ret = parent;
+
+   load_block(block,parent,bx);
+
+
+   if (is_full(block)) {
+      split_internal(&ret,key,parent,block,bx);
+   }
+
+
+
+   /* find position */
+   pos = find_slot(key,block);
+   shift_internal(block,pos);
+
+   /* set values */
+   set_slot(key,val,block,pos);
+   set_pointer(pointer,block,pos+1);
+
+   /* save changes */
+   write_block(block,ret,bx);
+
+}
+
+void split_leaf(long int to_add, struct bx_tree *bx) {
+   static int mid_val = MAX_ELEMENTS / 2;
+   static int mid_pos = (MAX_ELEMENTS / 2) * 16;
+   static char new_block[BLOCKSIZE];
+
+   long int key;
+   int val;
+   int old_pointer;
+   int parent;
+
+
+   /* get realavant values */
+   parent = rem_parent(bx);
+   get_key(&key,bx->cached,mid_val);
+   get_val(&val,bx->cached,mid_val);
+   get_pointer(&old_pointer,bx->cached,MAX_ELEMENTS);
+
+   /* point old block to new one */
+   set_pointer(bx->total_blocks,bx->cached,MAX_ELEMENTS);
+
+   /* create new block */
+   load_block(new_block,bx->total_blocks,bx);
+
+   /* copy after mid to new block - exclude final node */
+   memcpy(new_block,bx->cached+mid_pos,BLOCKSIZE-(mid_pos+16));
+
+   /* now set it to zero */
+   memset(bx->cached+mid_pos,0,BLOCKSIZE-(mid_pos+16));
+   bx->cache_written = 1;
+
+   /* point new block to next one */
+   set_pointer(old_pointer,new_block,MAX_ELEMENTS);
+
+   write_block(new_block,bx->total_blocks-1,bx);
+
+   if (key <= to_add) {
+      safe_load_cache(bx->total_blocks-1,bx);
+   }
+
+   /* now we need to add to the parent */
+   if (parent) {
+      add_to_parent(key,val,bx->total_blocks-1,parent,bx);
+   }
+   else {
+      add_to_root_parent(key,val,bx->total_blocks-1,bx);
+   }
+
+}
+

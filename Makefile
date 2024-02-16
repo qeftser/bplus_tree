@@ -19,5 +19,5 @@ clean:
 	rm -f $(OBJ_FILES) ./bin/$(OUTPUT) bin/test.txt
 
 run: $(OUTPUT)
-	cd bin && ./$(OUTPUT) "gullivers-travels.txt" && cd ..
+	cd bin && ./$(OUTPUT) && cd ..
 

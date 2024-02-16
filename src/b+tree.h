@@ -11,11 +11,11 @@
 #include <string.h>
 #include <limits.h>
 
-#define BLOCKSIZE 128
+#define BLOCKSIZE 4096
 #define MAX_ELEMENTS (BLOCKSIZE-16) / 16
 
 struct bx_tree { char *filepath; int file; char root[4096]; char cached[4096]; int cache_written;
-                 int root_pos; int cache_pos; int total_blocks; int parent_stack[8]; int parents; };
+                 int root_pos; int cache_pos; int total_blocks; int parent_stack[32]; int parents; };
 void start_bx_tree(struct bx_tree *);
 void close_bx_tree(struct bx_tree *);
 int add_bx_tree(long int, int, struct bx_tree *);
@@ -35,8 +35,12 @@ int get_elements(char *block);
 int get_parent(struct bx_tree *);
 int is_full(char *);
 void shift(char *, int);
-void split(char *, struct bx_tree *);
+long int split(int *, char *, struct bx_tree *);
 long int split_root(struct bx_tree *);
 void print_block(char *block);
+void add_to_parent(long int, int, int, int, struct bx_tree *);
+void split_leaf(long int, struct bx_tree *);
+void split_root_internal(int *, long int, char *, struct bx_tree *);
+void write_block(char *, int, struct bx_tree *);
 
 #endif
